@@ -1,8 +1,8 @@
-import csv
 import json
 import os
 import random
 import sqlite3
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
@@ -149,18 +149,13 @@ class DatabaseManager:
 
     def get_projects(self):
         conn = self._get_connection()
-        rows = conn.execute(
-            "SELECT * FROM projects ORDER BY id DESC"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
         conn.close()
         return [dict(r) for r in rows]
 
     def get_project(self, project_id):
         conn = self._get_connection()
-        row = conn.execute(
-            "SELECT * FROM projects WHERE id = ?",
-            (project_id,),
-        ).fetchone()
+        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
         conn.close()
         return dict(row) if row else None
 
@@ -267,7 +262,17 @@ class DatabaseManager:
             (project_id, blueprint_context, angle, hook, script, visual_cues, bg_video_path, status, score, version)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             """,
-            (project_id, blueprint_context, angle, hook, script, visual_cues, bg_video_path, self._score_script(script), next_version),
+            (
+                project_id,
+                blueprint_context,
+                angle,
+                hook,
+                script,
+                visual_cues,
+                bg_video_path,
+                self._score_script(script),
+                next_version,
+            ),
         )
         conn.commit()
         conn.close()
@@ -383,7 +388,6 @@ def compute_trend_score_from_views(views, platform):
 
 st.set_page_config(page_title="AOTCSE SaaS Studio", page_icon="🚀", layout="wide")
 
-
 db = DatabaseManager()
 llm = LocalLLMClient()
 media = MediaPipeline()
@@ -456,11 +460,11 @@ project = db.get_project(st.session_state.project_id) or db.get_project(db.get_d
 summary = db.get_project_summary(st.session_state.project_id)
 
 st.markdown(
-    """
+    f"""
     <div class='hero'>
         <div style='font-size:0.74rem; letter-spacing:0.14em; text-transform:uppercase; color:#93c5fd; margin-bottom:0.3rem;'>AOTCSE SaaS Studio</div>
         <h1 style='margin:0; color:#f8fafc;'>Autonomous Content Operations</h1>
-        <div style='margin-top:0.7rem; color:#cbd5e1;'>Workspace: <strong>""" + (project["name"] if project else "Default") + """</strong> | Niche: <strong>""" + (project["niche"] if project else "General") + """</strong></div>
+        <div style='margin-top:0.7rem; color:#cbd5e1;'>Workspace: <strong>{project['name'] if project else 'Default'}</strong> | Niche: <strong>{project['niche'] if project else 'General'}</strong></div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -553,250 +557,5 @@ with tabs[1]:
     query = st.text_input("Search trends", value="")
     platform_filter = st.selectbox("Platform", ["all", "YouTube Shorts", "TikTok", "Instagram Reels", "LinkedIn"])
     include_archived = st.checkbox("Include archived")
-    trends = db.get_trends(st.session_state.project_id, query=query, platform=platform_filter, include_archived=include_archived)
-
-    if trends:
-        df = pd.DataFrame(trends)
-        st.line_chart(df.set_index("topic")["score"], use_container_width=True)
-        st.dataframe(
-            df[["topic", "platform", "views", "score", "status", "created_at"]].sort_values("score", ascending=False),
-            use_container_width=True,
-        )
-    else:
-        st.info("No trends available for this project yet. Run the scan or add a trend.")
-
-    st.divider()
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Trend collector")
-        topic_input = st.text_input("Trend topic", value="AI automation")
-        platform_input = st.selectbox("Trend platform", ["YouTube Shorts", "TikTok", "Instagram Reels", "LinkedIn"])
-        views_input = st.number_input("Views", min_value=0, value=120000)
-        if st.button("Save trend", type="primary", use_container_width=True):
-            db.save_trend(st.session_state.project_id, topic_input, int(views_input), platform_input)
-            st.success("Trend stored and scored.")
-            st.rerun()
-    with right:
-        st.markdown("#### AI trend scoring")
-        sample_views = st.number_input("Estimate views", min_value=0, value=250000)
-        sample_platform = st.selectbox("Platform preview", ["YouTube Shorts", "TikTok", "Instagram Reels", "LinkedIn"], key="score_preview")
-        if st.button("Calculate score", use_container_width=True):
-            score = compute_trend_score_from_views(sample_views, sample_platform)
-            st.metric("Trend score", f"{score}")
-
-with tabs[2]:
-    st.subheader("Content studio")
-    if st.session_state.get("current_blueprint"):
-        bp = st.session_state.current_blueprint
-        st.markdown(
-            f"""
-            <div class='soft-card'>
-                <div style='font-weight:700; margin-bottom:0.5rem;'>Active blueprint</div>
-                <div><strong>Core message:</strong> {bp.core_message}</div>
-                <div><strong>Visual style:</strong> {bp.visual_atmosphere}</div>
-                <div><strong>Audience:</strong> {bp.target_audience}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    else:
-        st.info("No active blueprint yet. Generate one from Trends or build a manual brief.")
-
-    blueprint_context = st.text_area("Blueprint context", value="AI automation for creators")
-    prompt_input = st.text_area("Manual brief", value="Create a clear, engaging short-form video about practical AI workflow improvements.")
-    if st.button("Generate blueprint", type="primary", use_container_width=True):
-        try:
-            blueprint = llm.generate_structured(prompt_input, VideoBlueprint)
-        except Exception:
-            blueprint = VideoBlueprint(
-                core_message="Practical AI workflow improvement",
-                visual_atmosphere="Fast cuts, modern typography, premium motion graphics",
-                target_audience="Creators and small business operators",
-            )
-        st.session_state.current_blueprint = blueprint
-        st.success("Blueprint generated.")
-
-    st.divider()
-
-    if st.session_state.get("current_blueprint"):
-        if st.button("Create 3 variants", type="primary", use_container_width=True):
-            bp = st.session_state.current_blueprint
-            angles = [
-                "Controversial / provocative",
-                "Educational step-by-step",
-                "Story-driven / personal",
-            ]
-            bg_videos = []
-            temp_dir = getattr(media, "temp_dir", None)
-            if temp_dir and os.path.isdir(temp_dir):
-                bg_videos = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.lower().endswith(".mp4")]
-
-            conn = db._get_connection()
-            for index, angle in enumerate(angles, start=1):
-                prompt = (
-                    f"Create a short-form video script. Angle: {angle}. Audience: {bp.target_audience}. "
-                    f"Core message: {bp.core_message}. Visual style: {bp.visual_atmosphere}."
-                )
-                try:
-                    script_obj = llm.generate_structured(prompt, VideoScript)
-                except Exception:
-                    script_obj = None
-                if not script_obj:
-                    script_obj = VideoScript(
-                        hook="This shift is changing the way creators work.",
-                        body="Here are the operations that matter most right now.",
-                        cta="Follow for more tactical AI insight.",
-                        visual_cues="Fast cuts, zoom, clean subtitles",
-                    )
-
-                bg_path = random.choice(bg_videos) if bg_videos else ""
-                full_script = f"{script_obj.hook} {script_obj.body} {script_obj.cta}"
-                conn.execute(
-                    """
-                    INSERT INTO content_proposals (project_id, blueprint_context, angle, hook, script, visual_cues, bg_video_path, status, score, version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, 1)
-                    """,
-                    (st.session_state.project_id, blueprint_context, angle, script_obj.hook, full_script, script_obj.visual_cues, bg_path, 50),
-                )
-            conn.commit()
-            conn.close()
-            st.success("Three proposals created.")
-            st.rerun()
-
-    st.divider()
-    proposals = db.get_proposals(st.session_state.project_id, status="pending")
-    if proposals:
-        for proposal in proposals:
-            with st.container():
-                st.markdown(f"<div class='soft-card'><strong>Proposal #{proposal['id']}</strong> | {proposal['angle']} | {badge_html('pending', 'warning')}</div>", unsafe_allow_html=True)
-                col_text, col_visual = st.columns([3, 2])
-                with col_text:
-                    st.markdown(f"**Hook:** {proposal['hook']}")
-                    st.markdown(f"**Script:** {proposal['script']}")
-                    st.info(f"**Visual cues:** {proposal['visual_cues']}")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("Approve & render", key=f"approve_{proposal['id']}", type="primary", use_container_width=True):
-                            try:
-                                audio_path = media.generate_voiceover(proposal['script'])
-                                final_path = None
-                                if proposal["bg_video_path"] and os.path.exists(proposal["bg_video_path"]) and audio_path:
-                                    final_path = media.render_final_video(proposal["bg_video_path"], audio_path)
-                                db.update_proposal_status(proposal["id"], "approved")
-                                db.add_post(
-                                    st.session_state.project_id,
-                                    project["niche"],
-                                    "Shorts/Reels",
-                                    proposal["angle"],
-                                    proposal["script"],
-                                    final_path,
-                                    "queued",
-                                )
-                                st.success("Approved and queued.")
-                                st.rerun()
-                            except Exception as exc:
-                                st.error(f"Render error: {exc}")
-                    with c2:
-                        if st.button("Reject", key=f"reject_{proposal['id']}", use_container_width=True):
-                            db.update_proposal_status(proposal["id"], "rejected")
-                            st.rerun()
-                with col_visual:
-                    if proposal["bg_video_path"] and os.path.exists(proposal["bg_video_path"]):
-                        st.video(proposal["bg_video_path"])
-                    else:
-                        st.warning("No background media found. Add a .mp4 sample to continue.")
-            st.divider()
-    else:
-        st.info("No pending variants. Generate a set to populate the content studio.")
-
-with tabs[3]:
-    st.subheader("Publishing queue")
-    posts = db.get_posts(st.session_state.project_id)
-    if posts:
-        df = pd.DataFrame(posts)
-        df["Status"] = df["status"].apply(lambda x: "✅ Published" if x == "published" else "⏳ Queued")
-        df["Media"] = df["media_path"].apply(lambda x: "🎥 Rendered" if x else "📄 Text")
-        st.dataframe(df[["id", "Status", "Media", "platform", "status", "created_at"]], use_container_width=True)
-        if st.button("Bulk publish queue", type="primary", use_container_width=True):
-            queued = [p for p in posts if p["status"] == "queued"]
-            for item in queued:
-                try:
-                    publisher.export_to_webhook(
-                        item["id"],
-                        item["niche"],
-                        item["platform"],
-                        item["result"],
-                        item["media_path"],
-                        None,
-                    )
-                    db.mark_post_status(item["id"], "published", True)
-                except Exception:
-                    db.mark_post_status(item["id"], "failed", False)
-            st.success("Queue processed.")
-            st.rerun()
-    else:
-        st.info("No posts in queue yet. Approve a proposal to create the first publishable item.")
-
-with tabs[4]:
-    st.subheader("Operations monitor")
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage(os.getcwd())
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        render_kpi("CPU", f"{psutil.cpu_percent(interval=0.2)} %", "Processor load", "🧠", "#60a5fa")
-    with c2:
-        render_kpi("RAM", f"{mem.percent} %", f"Free: {mem.available / (1024**3):.1f} GB", "💾", "#a78bfa")
-    with c3:
-        render_kpi("Storage", f"{disk.percent} %", f"Free: {disk.free / (1024**3):.1f} GB", "💿", "#34d399")
-
-    st.divider()
-    gpu_col, service_col = st.columns(2)
-    with gpu_col:
-        st.markdown("### GPU / acceleration")
-        try:
-            import subprocess
-            gpu_info = subprocess.check_output(
-                ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader,nounits"],
-                stderr=subprocess.STDOUT,
-                timeout=2,
-            ).decode().strip()
-            gpu_util, mem_used, mem_total = gpu_info.split(",")
-            st.metric("GPU utilization", f"{gpu_util.strip()} %")
-            st.progress(float(mem_used.strip()) / float(mem_total.strip()), text=f"VRAM: {mem_used.strip()} MB / {mem_total.strip()} MB")
-        except Exception:
-            st.warning("GPU metrics unavailable in current runtime. Host-side acceleration may still be active.")
-    with service_col:
-        st.markdown("### Service health")
-        st.markdown(f"**Ollama:** {'✅ Healthy' if llm.check_health() else '❌ Offline'}")
-        st.markdown(f"**RAG:** {'✅ Connected' if rag_engine else '⚠️ Not detected'}")
-        st.markdown("**Production watchdog:** ✅ Active")
-        st.markdown("**Webhook export:** ✅ Monitored")
-
-with tabs[5]:
-    st.subheader("Data & integrations")
-
-    st.markdown("### Export")
-    export_df = pd.DataFrame(db.get_posts(st.session_state.project_id))
-    if not export_df.empty:
-        csv_data = export_df.to_csv(index=False).encode("utf-8")
-        st.download_button("Download posts CSV", data=csv_data, file_name=f"aotcse_posts_{st.session_state.project_id}.csv", mime="text/csv")
-
-    if st.button("Create project backup", use_container_width=True):
-        backup_dir = os.path.join(settings.BASE_DIR, "backup_exports")
-        backup_path = db.export_backup(st.session_state.project_id, backup_dir)
-        st.success(f"Backup created at: {backup_path}")
-
-    st.markdown("### API payload preview")
-    payload = {
-        "project_id": st.session_state.project_id,
-        "project_name": project["name"],
-        "niche": project["niche"],
-        "export_timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "posts": db.get_posts(st.session_state.project_id),
-    }
-    st.json(payload)
-
-    st.markdown("### Automation features")
-    st.markdown(f"{badge_html('Multi-project workspace', 'primary')} {badge_html('Smart scoring', 'success')} {badge_html('Retry logic', 'warning')} {badge_html('Bulk export', 'purple')} {badge_html('API payloads', 'primary')}")
-
-st.markdown("<div style='height:2rem;'></div>", unsafe_allow_html=True)
+    trends =*
+
