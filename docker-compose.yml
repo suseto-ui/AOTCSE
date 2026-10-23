@@ -1,0 +1,16 @@
+services:
+  aotcse_streamlit:
+    build: .
+    container_name: aotcse_streamlit
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - OLLAMA_URL=http://host.docker.internal:11434/api/generate
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - TZ=Europe/Prague
+      - OMP_NUM_THREADS=4
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
